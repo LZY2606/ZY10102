@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>隔离 PKI 排练台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>隔离 PKI 签发排练台</h1>
+    <p>私钥仅保留为本地 <code>keys/</code> 引用；导出包不包含私钥。</p>
+  </div>
+  <div class="toolbar">
+    <button id="refresh">刷新状态</button>
+    <button id="export">导出公开包</button>
+  </div>
+</header>
+
+<section id="recover" class="banner hidden"></section>
+<section id="notice" class="notice hidden"></section>
+
+<main>
+  <section class="grid two">
+    <form id="root-form" class="card">
+      <h2>1. 登记根 CA</h2>
+      <label>名称 <input name="name" required placeholder="隔离测试根"></label>
+      <label>CN <input name="cn" required placeholder="Root CA"></label>
+      <label>O <input name="organization"></label>
+      <label>密钥类型
+        <select name="key_type"><option>EC-P256</option><option>EC-P384</option><option>Ed25519</option><option>RSA-2048</option><option>RSA-3072</option></select>
+      </label>
+      <label>签名算法
+        <select name="sig"><option></option><option>SHA256-ECDSA</option><option>SHA384-ECDSA</option><option>Ed25519</option><option>SHA256-RSA</option></select>
+      </label>
+      <label>notBefore <input name="not_before" type="datetime-local" step="1" required></label>
+      <label>notAfter <input name="not_after" type="datetime-local" step="1" required></label>
+      <label>DNS 名称约束（逗号）<input name="permitted_dns" placeholder="example.test,.example.test"></label>
+      <button>登记根证书</button>
+    </form>
+
+    <form id="template-form" class="card">
+      <h2>2. 登记中间证书模板</h2>
+      <label>名称 <input name="name" required></label>
+      <label>CN <input name="cn" required></label>
+      <label>密钥类型
+        <select name="key_type"><option>EC-P256</option><option>EC-P384</option><option>Ed25519</option><option>RSA-2048</option></select>
+      </label>
+      <label>pathLen <input name="path_len" type="number" min="0" value="0"></label>
+      <label>允许 DNS 约束（逗号）<input name="permitted_dns" placeholder="example.test"></label>
+      <label>排除 DNS 约束（逗号）<input name="excluded_dns"></label>
+      <label>允许 IP CIDR（逗号）<input name="permitted_ip"></label>
+      <label>临时有效期起点 <input name="not_before" type="datetime-local" step="1" required></label>
+      <label>临时有效期终点 <input name="not_after" type="datetime-local" step="1" required></label>
+      <button>登记模板和本地测试密钥</button>
+    </form>
+  </section>
+
+  <section class="grid two">
+    <form id="request-form" class="card">
+      <h2>3. 提交主体请求</h2>
+      <label>用途 <select name="purpose"><option value="leaf">最终实体</option><option value="intermediate">中间 CA 交叉签发</option></select></label>
+      <label>名称 <input name="name" required></label>
+      <label>CN <input name="cn" required></label>
+      <label>中间模板（中间 CA 必选）<select name="template_id"></select></label>
+      <label>签发者（多选时生成多条候选链）<select name="issuer_ids" multiple size="4"></select></label>
+      <label>幂等键 <input name="idempotency_key" placeholder="留空自动生成"></label>
+      <label>密钥类型（叶子）<select name="key_type"><option>EC-P256</option><option>EC-P384</option><option>Ed25519</option><option>RSA-2048</option></select></label>
+      <label>签名算法 <select name="sig"><option></option><option>SHA256-ECDSA</option><option>SHA384-ECDSA</option><option>Ed25519</option><option>SHA256-RSA</option></select></label>
+      <label>notBefore <input name="not_before" type="datetime-local" step="1" required></label>
+      <label>notAfter <input name="not_after" type="datetime-local" step="1" required></label>
+      <label>DNS SAN（逗号）<input name="dns"></label>
+      <label>IP SAN（逗号）<input name="ips"></label>
+      <label>EKU（逗号）<input name="ekus" placeholder="serverAuth,clientAuth"></label>
+      <label>Key Usage（逗号）<input name="key_usage" placeholder="digitalSignature,keyEncipherment"></label>
+      <label>pathLen（中间 CA）<input name="path_len" type="number" min="0" value="0"></label>
+      <button>验证并生成候选</button>
+    </form>
+
+    <form id="policy-form" class="card">
+      <h2>4. 更新扩展与签名策略</h2>
+      <label>允许签名算法（逗号）<input name="allowed_sig" required></label>
+      <label>允许密钥类型（逗号）<input name="allowed_keys" required></label>
+      <label>最大有效期（天）<input name="max_days" type="number" min="1" required></label>
+      <label>最小有效期（小时）<input name="min_hours" type="number" min="1" required></label>
+      <label><input type="checkbox" name="require_san"> 叶子必须有 SAN</label>
+      <label><input type="checkbox" name="wildcard"> 允许 DNS 通配符</label>
+      <label><input type="checkbox" name="require_aki"> 要求 AKI</label>
+      <button>创建新策略版本</button>
+      <p class="hint">策略版本改变后，旧幂等键冲突会返回 409；必须新建流程。</p>
+    </form>
+  </section>
+
+  <section class="grid five">
+    <article class="card status pending"><h2>待确认</h2><div data-list="pending"></div></article>
+    <article class="card status accepted"><h2>已接受</h2><div data-list="accepted"></div></article>
+    <article class="card status rejected"><h2>被拒绝</h2><div data-list="rejected"></div></article>
+    <article class="card status revoked"><h2>已吊销</h2><div data-list="revoked"></div></article>
+    <article class="card status recovering"><h2>恢复中</h2><div data-list="recovering"></div></article>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>证书与候选</h2>
+      <div id="certificates"></div>
+    </div>
+    <div class="card">
+      <h2>链验证</h2>
+      <form id="verify-form" class="inline">
+        <select name="cert_id" required></select>
+        <input name="verify_at" type="datetime-local" step="1" required>
+        <button>在所选时间验证</button>
+      </form>
+      <div id="verify-result"></div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>事件证明</h2>
+      <div id="events"></div>
+    </div>
+    <div class="card">
+      <h2>恢复与重新导入</h2>
+      <form id="import-form">
+        <input type="file" name="bundle" accept=".zip" required>
+        <button>导入空库</button>
+      </form>
+      <p class="hint">导入会按事件序号、哈希前驱、重复事件和成员顺序重新验证；当前库非空会拒绝。</p>
+      <h3>事件链根</h3><pre id="proof-root"></pre>
+    </div>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

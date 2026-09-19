@@ -34,3 +34,9 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+
+# Local PKI runtime state and test-only private keys
+/data/
+/*.zip
+/data*/
+/.runtime-trash/
